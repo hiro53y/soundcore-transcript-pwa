@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+*.log
+.vite/
+# 実音声データは絶対にコミットしない
+*.mp3
+*.m4a
+*.wav
+*.webm
+tmp/
+.scratch/
