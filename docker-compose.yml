@@ -1,0 +1,12 @@
+# ローカル/VPS用。HTTPS終端はリバースプロキシ(Caddy等)やホスティング側で行うこと。
+services:
+  app:
+    build: .
+    ports:
+      - '8080:8080'
+    env_file: .env
+    # 一時ファイルをディスクに残さない(メモリ上tmpfs)。長時間音声を扱うなら size を増やす。
+    tmpfs:
+      - /tmp:size=2g
+    restart: unless-stopped
+    read_only: true
