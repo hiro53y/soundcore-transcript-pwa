@@ -27,6 +27,8 @@ jobs:
         env:
           VITE_BASE: /${{ github.event.repository.name }}/
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true # Pagesが未有効なら自動で有効化を試みる（権限が足りない場合は Settings → Pages で手動設定）
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web/dist
