@@ -1,10 +1,12 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button, Card, Notice } from '../components/ui';
 import { getSettings, listRecords, patchSettings } from '../lib/db';
 import { describeError } from '../lib/api';
 import { formatDateTime } from '../lib/format';
 import { navigate, useLive } from '../lib/hooks';
 import { importAudio } from '../lib/importFile';
+import { TEXT_LABELS, TRANSCRIBE_LABELS } from '../lib/engines/labels';
+import { installAvailable, isStandalone, promptInstall, subscribeInstall } from '../lib/install';
 
 export function Home({ notice }: { notice?: { kind: 'info' | 'warn' | 'error' | 'ok'; text: string } }) {
   const records = useLive(listRecords, []);
@@ -34,16 +36,34 @@ export function Home({ notice }: { notice?: { kind: 'info' | 'warn' | 'error' | 
   return (
     <div className="stack">
       {shown && <Notice kind={shown.kind}>{shown.text}</Notice>}
-      {settings && !settings.accessToken && (
+      {settings?.transcribeEngine === 'gemini' && !settings.geminiApiKey && (
         <Notice kind="warn">
-          初回設定: <a href="#/settings">設定</a>でアクセストークン（サーバー管理者が決めた合言葉）を入力してください。
+          Geminiを使うには、<a href="#/settings">設定</a>でAPIキーを入力してください。
         </Notice>
       )}
+      {settings?.transcribeEngine === 'server' && !settings.accessToken && (
+        <Notice kind="warn">
+          自前サーバーを使うには、<a href="#/settings">設定</a>でアクセストークンを入力してください。
+        </Notice>
+      )}
+      <InstallCard />
       <Card>
         <input ref={input} type="file" accept="audio/*,.mp3,.m4a,.wav" hidden onChange={(e) => void onPick(e.target.files)} data-testid="file-input" />
         <Button kind="primary" block className="btn-hero" onClick={() => input.current?.click()}>MP3を選択</Button>
         <p className="muted small center">または Soundcoreアプリの「音声をエクスポート」→ MP3 → 共有先でこのアプリを選ぶと、自動で取り込まれます。</p>
       </Card>
+      {settings && (
+        <Card title="使い方（3ステップ）">
+          <ol className="steps">
+            <li>Soundcoreアプリで録音を「音声をエクスポート」→ <strong>MP3</strong> を選ぶ</li>
+            <li>共有先の一覧から <strong>「議事録AI」</strong> を選ぶ（出ない場合は上の「MP3を選択」でもOK）</li>
+            <li>内容を確認して <strong>「文字起こしを開始」</strong> を押す。あとは画面の案内どおり</li>
+          </ol>
+          <p className="muted small">
+            いまの設定：文字起こし＝{TRANSCRIBE_LABELS[settings.transcribeEngine]}／整文・議事録＝{TEXT_LABELS[settings.textEngine]}。 <a href="#/settings">変更する</a>
+          </p>
+        </Card>
+      )}
       <Card title="最近の記録">
         {!records ? <p className="muted">読み込み中…</p> : records.length === 0 ? <p className="muted">まだ記録はありません。</p> : (
           <ul className="list">
@@ -63,6 +83,23 @@ export function Home({ notice }: { notice?: { kind: 'info' | 'warn' | 'error' | 
 }
 
 import type { RecordItem } from '../lib/types';
+
+function InstallCard() {
+  const [, force] = useState(0);
+  useEffect(() => subscribeInstall(() => force((n) => n + 1)), []);
+  if (isStandalone()) return null;
+  return (
+    <Card title="まず、ホーム画面に追加してください" tone="info">
+      <p className="small">Soundcoreアプリの共有先にこのアプリを表示するには、<strong>ホーム画面へのインストールが必要</strong>です（無料）。</p>
+      {installAvailable() ? (
+        <Button kind="primary" block onClick={() => void promptInstall()}>アプリをインストール</Button>
+      ) : (
+        <p className="small">Chromeの右上メニュー（︙）→「<strong>アプリをインストール</strong>」または「ホーム画面に追加」を選んでください。</p>
+      )}
+    </Card>
+  );
+}
+
 export function statusLabel(r: RecordItem): string {
   if (r.stages.transcribe.status === 'running') return '文字起こし中';
   if (r.stages.transcribe.status !== 'done') return '文字起こし前';

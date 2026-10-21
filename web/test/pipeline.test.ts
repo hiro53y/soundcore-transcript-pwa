@@ -26,8 +26,9 @@ async function newRec() {
   return r.record.id;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
+  await patchSettings({ transcribeEngine: 'server', textEngine: 'server' });
   vi.mocked(api.deleteJob).mockResolvedValue(undefined);
 });
 

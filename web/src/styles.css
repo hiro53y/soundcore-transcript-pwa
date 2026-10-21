@@ -77,3 +77,9 @@ del, .diff-del { color: var(--del); background: color-mix(in srgb, var(--del) 12
 .tabbar { position: fixed; left: 0; right: 0; bottom: 0; height: calc(var(--tab-h) + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom); display: flex; background: var(--card); border-top: 1px solid var(--line); z-index: 6; }
 .tabbar a { flex: 1; display: flex; align-items: center; justify-content: center; text-decoration: none; color: var(--muted); font-weight: 600; }
 .tabbar a[aria-current='page'] { color: var(--primary); }
+.radio { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; }
+.radio input { width: 22px; height: 22px; margin-top: 4px; flex: none; }
+.block { display: block; }
+select { width: 100%; font: inherit; padding: 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); margin-top: 4px; }
+.steps { padding-left: 1.3em; margin: 0 0 8px; } .steps li { margin: 6px 0; }
+.card-info { border-color: var(--primary); }

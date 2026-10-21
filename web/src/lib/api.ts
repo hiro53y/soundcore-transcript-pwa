@@ -116,7 +116,7 @@ export function uploadAudio(
 /** 画面に出すための日本語メッセージ。スタックトレース等は出さない。 */
 export function describeError(e: unknown): string {
   if (e instanceof ApiError) return e.message;
-  if ((e as { name?: string })?.name === 'StorageError') return (e as Error).message;
+  if (['StorageError', 'EngineError', 'PartialError'].includes((e as { name?: string })?.name ?? '')) return (e as Error).message;
   if ((e as { name?: string })?.name === 'QuotaExceededError') return '端末の保存容量が不足しています。不要な履歴や音声を削除してください。';
   return '予期しないエラーが発生しました。もう一度お試しください。';
 }

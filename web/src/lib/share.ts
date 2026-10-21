@@ -18,7 +18,10 @@ export interface ShareDeps {
  * - 保存先IDはランダム。ページ側が取り出し時に削除する（二重登録・再処理防止）。
  */
 export async function handleShare(request: Request, deps: ShareDeps): Promise<Response> {
-  const redirect = (qs: string) => new Response(null, { status: 303, headers: { Location: `/?${qs}` } });
+  // 配信パス(base)は共有POSTのURLから導く（例: /soundcore-transcript-pwa/share-target → /soundcore-transcript-pwa/）
+  const path = new URL(request.url).pathname;
+  const base = path.endsWith('share-target') ? path.slice(0, -'share-target'.length) : '/';
+  const redirect = (qs: string) => new Response(null, { status: 303, headers: { Location: `${base}?${qs}` } });
   try {
     const form = await request.formData();
     const ids: string[] = [];

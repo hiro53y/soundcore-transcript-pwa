@@ -19,6 +19,10 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - name: Build for GitHub Pages (サブパス配信)
+        run: npm run build -w @app/web -- --outDir /tmp/pages-dist --emptyOutDir
+        env:
+          VITE_BASE: /soundcore-transcript-pwa/
   docker:
     runs-on: ubuntu-latest
     steps:

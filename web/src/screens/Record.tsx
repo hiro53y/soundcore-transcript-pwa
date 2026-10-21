@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { OUTPUT_KINDS, OUTPUT_LABELS, type Correction, type OutputKind } from '@app/shared';
 import { Button, Card, DiffView, ExportBar, Notice, PrivacyNotice, ProgressBar, SubmitBar } from '../components/ui';
 import { countOccurrences, decide, pendingCount } from '../lib/corrections';
-import { deleteAudio, getAudio, getRecord, putRecord } from '../lib/db';
+import { deleteAudio, getAudio, getRecord, getSettings, putRecord } from '../lib/db';
+import { getTranscribeEngine } from '../lib/engines';
+import { downloadHint, isWhisperCached } from '../lib/engines/local';
 import { recordToMarkdown } from '../lib/exporter';
 import { formatBytes, formatDateTime, formatDuration } from '../lib/format';
 import { useLive, useOnline } from '../lib/hooks';
@@ -84,6 +86,9 @@ function StageError({ stage }: { stage: StageState }) {
 function TranscribeStep({ rec, next }: { rec: RecordItem; next: () => void }) {
   const online = useOnline();
   const hasAudio = useLive(() => getAudio(rec.id).then(Boolean), [rec.id, rec.audioDeleted]);
+  const settings = useLive(getSettings, []);
+  const cached = useLive(() => (settings ? isWhisperCached(settings.whisperModel) : Promise.resolve(true)), [settings?.whisperModel]);
+  const blocked = settings ? getTranscribeEngine(settings).preflight?.({ durationSec: rec.durationSec, size: rec.fileSize }) : undefined;
   const progress = getProgress(rec.id);
   const running = rec.stages.transcribe.status === 'running' || isRunning(rec.id);
   const transcribed = rec.stages.transcribe.status === 'done';
@@ -107,16 +112,23 @@ function TranscribeStep({ rec, next }: { rec: RecordItem; next: () => void }) {
 
       {!transcribed && (
         <>
-          <PrivacyNotice />
-          {rec.durationSec !== undefined && rec.durationSec > 3600 && <Notice>長い音声です。処理には時間がかかり、API料金も増えます（サーバー側で自動分割します）。</Notice>}
+          {settings && <PrivacyNotice engine={settings.transcribeEngine} />}
+          {settings?.transcribeEngine === 'local' && (
+            <Notice>
+              {downloadHint(settings.whisperModel, cached ?? true)}
+              端末の性能によっては録音時間と同程度〜数倍の時間がかかります。処理中は<strong>画面を開いたまま</strong>にしてください（長い録音はGeminiの方が速く確実です）。
+            </Notice>
+          )}
+          {rec.durationSec !== undefined && rec.durationSec > 3600 && settings?.transcribeEngine !== 'local' && <Notice>長い音声です。処理には時間がかかります（自動で区間に分割して処理します）。</Notice>}
+          {blocked && <Notice kind="error">{blocked} <a href="#/settings">設定を開く</a></Notice>}
           <StageError stage={rec.stages.transcribe} />
           {running && <ProgressBar label={progress?.label ?? '処理中'} ratio={progress?.ratio} />}
           {!hasAudio && !rec.jobId && <Notice kind="error">この記録の音声は端末に残っていません。履歴の文字起こしは閲覧できますが、再度文字起こしするには音声ファイルを選び直してください。</Notice>}
           <SubmitBar>
-            <Button kind="primary" block disabled={running || !online || (!hasAudio && !rec.jobId)} onClick={() => void startTranscription(rec.id)}>
+            <Button kind="primary" block disabled={running || !!blocked || (settings?.transcribeEngine !== 'local' && !online) || (!hasAudio && !rec.jobId)} onClick={() => void startTranscription(rec.id)}>
               {running ? '文字起こし中…' : rec.stages.transcribe.status === 'error' ? (rec.jobId ? '失敗した区間を再試行' : '再試行') : '文字起こしを開始'}
             </Button>
-            {!online && <p className="muted small center">オフラインです。接続後に開始できます。</p>}
+            {!online && settings?.transcribeEngine !== 'local' && <p className="muted small center">オフラインです。接続後に開始できます。</p>}
           </SubmitBar>
         </>
       )}
@@ -213,6 +225,8 @@ function CorrectionCard({ c, raw, disabled, onDecide }: { c: Correction; raw: st
 
 function ReviewStep({ rec, next }: { rec: RecordItem; next: () => void }) {
   const online = useOnline();
+  const settings = useLive(getSettings, []);
+  const aiProofread = settings?.textEngine !== 'rules';
   const [directEdit, setDirectEdit] = useState(false);
   const raw = rec.rawTranscript;
   const working = useMemo(() => workingText(rec), [rec]);
@@ -226,14 +240,17 @@ function ReviewStep({ rec, next }: { rec: RecordItem; next: () => void }) {
       <Card title="誤認識の確認">
         <p className="muted small">AIや辞書が示すのは「候補」だけです。採用・却下・修正はあなたが決め、決定するまで本文は変わりません。</p>
         <div className="row">
-          <Button kind="primary" disabled={proofreadRunning || !online || rec.stages.proofread.status === 'done'} onClick={() => void runProofread(rec.id)}>
-            {proofreadRunning ? '候補を生成中…' : rec.stages.proofread.status === 'done' ? 'AI候補は生成済み' : 'AIで誤認識候補を探す'}
-          </Button>
-          <Button onClick={() => void addDictionaryCandidates(rec.id)}>辞書から候補を追加</Button>
+          {aiProofread && (
+            <Button kind="primary" disabled={proofreadRunning || !online || rec.stages.proofread.status === 'done'} onClick={() => void runProofread(rec.id)}>
+              {proofreadRunning ? '候補を生成中…' : rec.stages.proofread.status === 'done' ? 'AI候補は生成済み' : 'AIで誤認識候補を探す'}
+            </Button>
+          )}
+          <Button kind={aiProofread ? 'secondary' : 'primary'} onClick={() => void addDictionaryCandidates(rec.id)}>辞書から候補を追加</Button>
         </div>
+        {!aiProofread && <p className="muted small">AIによる候補は、設定で整文・議事録の方式を「Google Gemini」にすると使えます。今は専門用語辞書の候補のみです（無料）。</p>}
         {proofreadRunning && <ProgressBar label={getProgress(rec.id)?.label ?? '校正候補を生成中'} />}
         <StageError stage={rec.stages.proofread} />
-        {rec.stages.proofread.status === 'done' && (
+        {aiProofread && rec.stages.proofread.status === 'done' && (
           <button className="link" onClick={() => void runProofread(rec.id, true)} disabled={!online}>AI候補を再生成（追加料金）</button>
         )}
       </Card>
@@ -289,20 +306,25 @@ function ReviewStep({ rec, next }: { rec: RecordItem; next: () => void }) {
 // ---------------- ③ 整文 ----------------
 function PolishStep({ rec, next }: { rec: RecordItem; next: () => void }) {
   const online = useOnline();
+  const settings = useLive(getSettings, []);
+  const viaAi = settings?.textEngine !== 'rules';
   if (!rec.confirmedTranscript) return <Notice>先に「② 確認・校正」で確認済みにしてください。</Notice>;
   const running = rec.stages.polish.status === 'running';
   const stale = !!rec.polished && !!rec.confirmedAt && rec.confirmedAt > rec.polished.createdAt;
   return (
     <>
       <Card title="AI整文">
-        <p className="muted small">意味・数値・固有名詞を変えず、言い淀みや重複を整理します。AIによる整文であり、事実として確定したものではありません。元の確認済み文字起こしは保持されます。</p>
+        <p className="muted small">
+          {viaAi ? '意味・数値・固有名詞を変えず、言い淀みや重複を整理します。AIによる整文であり、事実として確定したものではありません。' : '言い淀み（えー・あのー等）や重複を機械的に取り除く簡易整文です（AIではありません）。'}
+          元の確認済み文字起こしは保持されます。
+        </p>
         <StageError stage={rec.stages.polish} />
         {running && <ProgressBar label={getProgress(rec.id)?.label ?? '整文中'} />}
         {!rec.polished && (
           <>
-            <PrivacyNotice />
+            {settings && <PrivacyNotice engine={settings.textEngine} />}
             <SubmitBar>
-              <Button kind="primary" block disabled={running || !online} onClick={() => void runPolish(rec.id)}>{running ? '整文中…' : '整文を実行'}</Button>
+              <Button kind="primary" block disabled={running || (viaAi && !online)} onClick={() => void runPolish(rec.id)}>{running ? '整文中…' : '整文を実行'}</Button>
             </SubmitBar>
           </>
         )}
@@ -333,12 +355,15 @@ function PolishStep({ rec, next }: { rec: RecordItem; next: () => void }) {
 // ---------------- ④ 成果物 ----------------
 function OutputsStep({ rec }: { rec: RecordItem }) {
   const online = useOnline();
+  const settings = useLive(getSettings, []);
   if (!rec.confirmedTranscript) return <Notice>先に「② 確認・校正」で確認済みにしてください。</Notice>;
+  const viaAi = settings?.textEngine !== 'rules';
   return (
     <>
-      <p className="muted small">生成物は確認済み文字起こしから作られ、それぞれ別のデータとして保存されます。入力に無い内容をAIが補うことは禁止していますが、重要事項は必ず確認してください。</p>
+      <p className="muted small">生成物は確認済み文字起こしから作られ、それぞれ別のデータとして保存されます。{viaAi ? '入力に無い内容をAIが補うことは禁止していますが、重要事項は必ず確認してください。' : 'いまはAIを使わない簡易版です（原文の文を抜き出して整理するだけ）。より自然な議事録は、設定で「Google Gemini」を選ぶと作れます。'}</p>
+      {settings && <PrivacyNotice engine={settings.textEngine} />}
       {OUTPUT_KINDS.map((k) => (
-        <OutputCard key={k} rec={rec} kind={k} online={online} />
+        <OutputCard key={k} rec={rec} kind={k} online={online || !viaAi} />
       ))}
       <Card title="すべてまとめてエクスポート">
         <ExportBar title={rec.title} text={recordToMarkdown(rec)} markdown={recordToMarkdown(rec)} suffix="全体" />

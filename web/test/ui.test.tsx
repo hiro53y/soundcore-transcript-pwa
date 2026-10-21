@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { getRecord, putRecord } from '../src/lib/db';
+import { getRecord, patchSettings, putRecord } from '../src/lib/db';
 import { newRecord } from '../src/lib/importFile';
 import { RecordScreen } from '../src/screens/Record';
 
@@ -53,15 +53,34 @@ describe('文字起こし確認UI', () => {
     await waitFor(async () => expect((await getRecord('r2'))?.confirmedTranscript).toBe('炉圧と板温度を確認'));
   });
 
-  it('確認画面では「文字起こしを開始」を押すまで開始されず、外部送信の注意が表示される', async () => {
+  it('確認画面では「文字起こしを開始」を押すまで開始されない。既定（端末内）は外部送信なしと表示し、初回DLの目安も出す', async () => {
     const r = newRecord({ id: 'r3', fileName: 'meeting.mp3', fileSize: 2048, durationSec: 125, fingerprint: 'f3', source: 'share', now: '2026-10-01T00:00:00Z' });
     await putRecord(r);
     render(<RecordScreen id="r3" />);
     await screen.findByText('meeting.mp3');
     expect(screen.getByText('2.0 KB')).toBeTruthy();
     expect(screen.getByText('2分5秒')).toBeTruthy();
-    expect(screen.getByText(/外部AIサービスへ音声を送信します/)).toBeTruthy();
+    await screen.findByText(/外部へ送信されません/);
+    await screen.findByText(/初回のみ、モデル/);
     expect(screen.getByRole('button', { name: '文字起こしを開始' })).toBeTruthy();
     expect((await getRecord('r3'))?.stages.transcribe.status).toBe('idle');
+  });
+
+  it('Gemini選択時は外部送信と無料枠の学習利用の注意を表示し、キー未設定なら開始できない', async () => {
+    await patchSettings({ transcribeEngine: 'gemini' });
+    const r = newRecord({ id: 'r4', fileName: 'm.mp3', fileSize: 2048, durationSec: 60, fingerprint: 'f4', source: 'share', now: '2026-10-01T00:00:00Z' });
+    await putRecord(r);
+    render(<RecordScreen id="r4" />);
+    await screen.findByText(/製品改善に使われる場合があります/);
+    await screen.findByText(/APIキーを入力してください/);
+    expect((screen.getByRole('button', { name: '文字起こしを開始' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('端末内方式で45分を超える音声は、開始前に理由と対処を表示する', async () => {
+    const r = newRecord({ id: 'r5', fileName: 'long.mp3', fileSize: 2048, durationSec: 60 * 60, fingerprint: 'f5', source: 'share', now: '2026-10-01T00:00:00Z' });
+    await putRecord(r);
+    render(<RecordScreen id="r5" />);
+    await screen.findByText(/上限（45分）を超えています/);
+    expect((screen.getByRole('button', { name: '文字起こしを開始' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

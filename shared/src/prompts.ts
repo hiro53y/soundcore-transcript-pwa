@@ -1,4 +1,4 @@
-import type { DictionaryContext, OutputKind } from '@app/shared';
+import type { DictionaryContext, OutputKind } from './index';
 
 /** すべてのLLM呼び出しに共通する、創作・推測を禁じる原則。 */
 export const CORE_RULES = `あなたは会議・現場の音声文字起こしを扱う、慎重な日本語編集者です。次の原則を必ず守ってください。

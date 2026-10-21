@@ -1,4 +1,5 @@
 import type { Correction, DictionaryTerm, OutputKind } from '@app/shared';
+import type { TextEngineId, TranscribeEngineId } from './engines/types';
 
 export type StageStatus = 'idle' | 'running' | 'done' | 'error';
 
@@ -68,8 +69,20 @@ export interface ShareInboxRow {
   text?: string;
 }
 
+export type WhisperSize = 'tiny' | 'base' | 'small';
+
 export interface Settings {
-  /** サーバーへのアクセス用合言葉（OpenAI APIキーではない）。 */
+  /** 文字起こしの方式。既定は端末内Whisper（無料・音声は端末外に出ない）。 */
+  transcribeEngine: TranscribeEngineId;
+  /** 整文・議事録等の方式。既定はAIなしのルールベース（無料）。 */
+  textEngine: TextEngineId;
+  whisperModel: WhisperSize;
+  /** WebGPUで高速化（実験的。失敗時は自動でWASMにフォールバック）。 */
+  whisperGpu: boolean;
+  /** ユーザー自身の Google AI Studio 無料キー。この端末のIndexedDBにのみ保存（バックアップ・ログ・リポジトリに含めない）。 */
+  geminiApiKey: string;
+  geminiModel: string;
+  /** self-host サーバーへのアクセス用合言葉（OpenAI APIキーではない）。 */
   accessToken: string;
   /** 文字起こし完了後に音声を自動削除（既定: 有効）。 */
   autoDeleteAudio: boolean;
@@ -81,7 +94,15 @@ export interface Settings {
   lastShare?: { fileName: string; mime: string; size: number; receivedAt: number; via: 'share' | 'picker' };
 }
 
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
+
 export const DEFAULT_SETTINGS: Settings = {
+  transcribeEngine: 'local',
+  textEngine: 'rules',
+  whisperModel: 'base',
+  whisperGpu: false,
+  geminiApiKey: '',
+  geminiModel: DEFAULT_GEMINI_MODEL,
   accessToken: '',
   autoDeleteAudio: true,
   autoStart: false,
@@ -96,5 +117,5 @@ export interface BackupFile {
   exportedAt: string;
   records: RecordItem[];
   dictionary: DictionaryEntry[];
-  settings: Omit<Settings, 'accessToken'>;
+  settings: Omit<Settings, 'accessToken' | 'geminiApiKey'>;
 }

@@ -1,5 +1,8 @@
-// ビルド済みPWAを実ブラウザ(Chromium)で検証する: manifest / Service Worker / share_target(POST→303) / オフライン / モックでの全工程。
-// 事前に `npm run build` が必要。外部通信なし（PROVIDER=mock）。
+// ビルド済みPWAを実ブラウザ(Chromium)で検証する。
+//  A) サーバー配信モード: manifest / Service Worker / share_target(POST→303) / オフライン / モックでの全工程
+//  B) GitHub Pages モード(サブパス配信・サーバーなし): manifest / SW / 共有POST→303 / 既定エンジン
+//     VERIFY_LOCAL=1 のときは、実際に端末内Whisper(tiny)をダウンロードして文字起こしまで実行（要ネットワーク）
+// 事前に `npm run build` が必要。VERIFY_LOCAL を除き外部通信なし（PROVIDER=mock）。
 import { spawn, execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import os from 'node:os';
@@ -83,8 +86,12 @@ try {
   const cacheKeys = await page.evaluate(async () => (await caches.keys()).length);
   check('アプリシェルがプリキャッシュされる', cacheKeys > 0);
 
-  // 設定: アクセストークン
+  // 設定: 自前サーバー方式を選び、アクセストークンを保存
   await page.goto(`${BASE}/#/settings`);
+  await page.waitForSelector('input[name=tengine] >> nth=2');
+  await page.click('input[name=tengine] >> nth=2');
+  await page.click('input[name=xengine] >> nth=2');
+  await page.waitForSelector('input[name=tengine] >> nth=2 >> visible=true');
   await page.fill('input[type=password]', TOKEN);
   await page.click('text=保存して接続確認');
   await page.waitForSelector('text=OK（mock）');
@@ -176,6 +183,124 @@ try {
 } finally {
   stop();
 }
+
+// ================= B) GitHub Pages モード（サブパス・サーバーなし） =================
+async function pagesMode() {
+  console.log('\n--- GitHub Pages モード（サーバーなし・サブパス配信）---');
+  const SUB = '/soundcore-transcript-pwa/';
+  const out = mkdtempSync(path.join(os.tmpdir(), 'pages-dist-'));
+  execFileSync('npm', ['run', 'build', '-w', '@app/web', '--', '--outDir', out, '--emptyOutDir'], { env: { ...process.env, VITE_BASE: SUB }, stdio: 'ignore' });
+  const MIME = { '.js': 'text/javascript', '.mjs': 'text/javascript', '.wasm': 'application/wasm', '.html': 'text/html', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
+  const { createServer } = await import('node:http');
+  const PORT2 = 18081;
+  const srv = createServer((req, res) => {
+    const url = new URL(req.url, 'http://x');
+    if (!url.pathname.startsWith(SUB) || req.method !== 'GET') return res.writeHead(404).end('not found');
+    const rel = url.pathname.slice(SUB.length) || 'index.html';
+    const file = path.join(out, rel);
+    if (!file.startsWith(out) || !existsSync(file)) return res.writeHead(404).end('not found');
+    res.setHeader('Content-Type', MIME[path.extname(file)] ?? 'application/octet-stream');
+    res.end(readFileSync(file));
+  });
+  await new Promise((r) => srv.listen(PORT2, r));
+  const B = `http://localhost:${PORT2}${SUB}`;
+  const m = await (await fetch(`${B}manifest.webmanifest`)).json();
+  check('[Pages] manifest の start_url/scope/id が配信パスと一致', m.start_url === SUB && m.scope === SUB && m.id === SUB);
+  check('[Pages] share_target.action が配信パス付き', m.share_target?.action === `${SUB}share-target` && m.share_target?.method === 'POST');
+  let ok = true;
+  for (const i of m.icons) ok &&= (await fetch(`http://localhost:${PORT2}${i.src}`)).status === 200;
+  check('[Pages] アイコンが配信パスで取得できる', ok);
+  check('[Pages] 端末内Whisperの実行エンジン(wasm)を自サイトから配信（CDN不使用）', (await fetch(`${B}ort/ort-wasm-simd-threaded.asyncify.wasm`)).status === 200);
+
+  const browser = await chromium.launch({ executablePath: chromePath, args: ['--no-sandbox'] });
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 800 }, locale: 'ja-JP' });
+  const page = await ctx.newPage();
+  const errors = [];
+  const hosts = new Set();
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('request', (r) => hosts.add(new URL(r.url()).host));
+  await page.goto(B);
+  await page.waitForSelector('text=MP3を選択');
+  check('[Pages] 「使い方（3ステップ）」を表示', await page.isVisible('text=使い方（3ステップ）'));
+  check('[Pages] 既定は端末内Whisper+簡易(AIなし)', (await page.textContent('body')).includes('この端末内（Whisper'));
+  const swOk = await page.evaluate(async () => {
+    const reg = await navigator.serviceWorker.ready;
+    for (let i = 0; i < 50 && reg.active?.state !== 'activated'; i++) await new Promise((r) => setTimeout(r, 100));
+    return reg.active?.state === 'activated' && new URL(reg.scope).pathname;
+  });
+  check('[Pages] Service Worker が配信パスのスコープで有効化', swOk === SUB, String(swOk));
+  await page.reload();
+  await page.goto(`${B}#/settings`);
+  await page.waitForSelector('input[name=tengine]');
+  check('[Pages] サーバー方式はサーバーが無い環境では表示されない', (await page.locator('input[name=tengine]').count()) === 2);
+
+  const bytes = [...readFileSync(mp3)];
+  await page.goto(`${B}#/`);
+  await page.evaluate(async ({ arr, action }) => {
+    const f = new File([new Uint8Array(arr)], 'pages-share.mp3', { type: 'audio/mpeg' });
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = action;
+    form.enctype = 'multipart/form-data';
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.name = 'audio';
+    const dt = new DataTransfer();
+    dt.items.add(f);
+    input.files = dt.files;
+    form.appendChild(input);
+    document.body.appendChild(form);
+    form.submit();
+  }, { arr: bytes, action: `${SUB}share-target` });
+  await page.waitForSelector('text=pages-share.mp3');
+  check('[Pages] 共有POST→SW→303→アプリの確認画面（配信パス内）', page.url().startsWith(B) && page.url().includes('#/r/') && !page.url().includes('share='), page.url());
+  check('[Pages] 端末内方式では「外部へ送信されません」と表示', await page.isVisible('text=外部へ送信されません'));
+  check('[Pages] 初回ダウンロードの目安を表示', await page.isVisible('text=初回のみ'));
+
+  if (process.env.VERIFY_LOCAL === '1') {
+    await page.goto(`${B}#/settings`);
+    await page.selectOption('select', 'tiny');
+    await page.goBack();
+    await page.waitForSelector('button:has-text("文字起こしを開始")');
+    await page.click('button:has-text("文字起こしを開始")');
+    const res = await Promise.race([
+      page.waitForSelector('[data-testid=raw-transcript]', { timeout: 240000 }).then(() => 'done'),
+      page.waitForSelector('[role=alert]', { timeout: 240000 }).then(() => 'error'),
+    ]);
+    const body = res === 'done' ? await page.textContent('[data-testid=raw-transcript]') : await page.textContent('[role=alert]');
+    check('[Pages/実Whisper] 端末内で文字起こしが完了（実モデル tiny）', res === 'done', body.slice(0, 120));
+    if (res === 'done') {
+      await page.click('button:has-text("誤認識を確認する")');
+      await page.click('button:has-text("確認済みにする")');
+      await page.waitForSelector('button:has-text("整文を実行")');
+      await page.click('button:has-text("整文を実行")');
+      await page.waitForSelector('[data-testid=polished]', { timeout: 15000 });
+      await page.click('button:has-text("議事録・要約へ")');
+      await page.click('button:has-text("議事録を生成")');
+      await page.waitForSelector('[data-testid=out-minutes]', { timeout: 15000 });
+      check('[Pages/実Whisper] ルールベースで整文・議事録まで生成（AIなし・無料）', (await page.textContent('[data-testid=out-minutes]')).includes('AIではありません'));
+    }
+  }
+
+  await ctx.setOffline(true);
+  await page.goto(`${B}#/history`);
+  await page.reload();
+  await page.waitForSelector('text=履歴');
+  check('[Pages] オフラインでもアプリシェルが表示される', true);
+  await ctx.setOffline(false);
+  const external = [...hosts].filter((h) => h && !h.startsWith('localhost')); // data:/blob: は host が空
+  const allowed = (h) => h === 'huggingface.co' || h.endsWith('.hf.co') || h.endsWith('.huggingface.co');
+  check('[Pages] 外部通信は Hugging Face（モデル取得）以外に無い', external.every(allowed), `外部ホスト: ${external.join(',') || 'なし'}`);
+  check('[Pages] ページ内JavaScriptエラーなし', errors.length === 0, errors.join(' | '));
+  await browser.close();
+  srv.close();
+}
+try {
+  await pagesMode();
+} catch (e) {
+  check('[Pages] 検証が最後まで完走', false, String(e?.stack ?? e));
+}
+
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} passed`);
 process.exit(failed.length ? 1 : 0);

@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import { diffStats, diffText } from '../lib/diff';
 import { useMemo, useState } from 'react';
+import type { TextEngineId, TranscribeEngineId } from '../lib/engines/types';
+import { privacyNoticeFor, textPrivacyNoticeFor } from '../lib/engines/notices';
 import { canShare, copyText, downloadText, safeFileName, shareText } from '../lib/exporter';
 
 export function Button(props: React.ButtonHTMLAttributes<HTMLButtonElement> & { kind?: 'primary' | 'secondary' | 'danger' | 'ghost'; block?: boolean }) {
@@ -36,13 +38,10 @@ export function ProgressBar({ label, ratio }: { label: string; ratio?: number })
   );
 }
 
-/** 外部AIへの送信前に必ず表示する注意文。 */
-export function PrivacyNotice() {
-  return (
-    <Notice kind="warn">
-      外部AIサービスへ音声を送信します。利用する音声について、所属組織の規程や関係者の同意等を確認してください。
-    </Notice>
-  );
+/** 処理前に必ず表示する、方式ごとのプライバシー注意文（外部送信がある方式は警告表示）。 */
+export function PrivacyNotice({ engine }: { engine: TranscribeEngineId | TextEngineId }) {
+  const text = engine === 'rules' ? textPrivacyNoticeFor('rules') : engine === 'local' ? privacyNoticeFor('local') : privacyNoticeFor(engine);
+  return <Notice kind={engine === 'local' || engine === 'rules' ? 'ok' : 'warn'}>{text}</Notice>;
 }
 
 export function SubmitBar({ children }: { children: ReactNode }) {

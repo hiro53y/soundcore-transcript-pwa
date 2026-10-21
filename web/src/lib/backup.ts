@@ -2,7 +2,8 @@ import { getDB, getSettings, listDictionary, listRecords, notifyDB } from './db'
 import type { BackupFile, DictionaryEntry, RecordItem } from './types';
 
 export async function buildBackup(): Promise<BackupFile> {
-  const { accessToken: _omit, ...settings } = await getSettings();
+  // 秘密情報（アクセストークン・Geminiキー）はバックアップに含めない
+  const { accessToken: _t, geminiApiKey: _k, ...settings } = await getSettings();
   return {
     app: 'soundcore-transcript-pwa',
     version: 1,

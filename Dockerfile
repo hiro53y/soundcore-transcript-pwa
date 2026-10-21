@@ -2,7 +2,7 @@
 # --- build: フロント(Vite PWA) + サーバー(esbuild) ---
 FROM node:22-bookworm-slim AS build
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY .npmrc package.json package-lock.json ./
 COPY shared/package.json shared/
 COPY server/package.json server/
 COPY web/package.json web/
@@ -17,7 +17,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production PORT=8080 HOST=0.0.0.0 WEB_DIST=/app/web/dist
-COPY package.json package-lock.json ./
+COPY .npmrc package.json package-lock.json ./
 COPY shared/ shared/
 COPY server/package.json server/
 COPY web/package.json web/

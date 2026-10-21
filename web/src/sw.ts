@@ -10,7 +10,7 @@ declare const self: ServiceWorkerGlobalScope & { __WB_MANIFEST: Array<{ url: str
 // ※ workbox のルーティングより前に登録すること。POST は workbox の GET ルートとは競合しない。
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
-  if (event.request.method === 'POST' && url.pathname === '/share-target') {
+  if (event.request.method === 'POST' && url.pathname.endsWith('/share-target')) {
     event.respondWith(
       (async () => {
         const db = await openAppDB();
@@ -21,7 +21,7 @@ self.addEventListener('fetch', (event) => {
           now: () => Date.now(),
           newId: () => crypto.randomUUID(),
         });
-      })().catch(() => new Response(null, { status: 303, headers: { Location: '/?share_error=failed' } })),
+      })().catch(() => new Response(null, { status: 303, headers: { Location: `${BASE}?share_error=failed` } })),
     );
   }
 });
@@ -31,7 +31,9 @@ precacheAndRoute(self.__WB_MANIFEST);
 cleanupOutdatedCaches();
 
 // SPAのナビゲーションはキャッシュ済み index.html を返す（オフライン時の基本画面）。API・共有は対象外。
-registerRoute(new NavigationRoute(createHandlerBoundToURL('/index.html'), { denylist: [/^\/api\//, /^\/share-target/] }));
+const BASE = import.meta.env.BASE_URL;
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+registerRoute(new NavigationRoute(createHandlerBoundToURL(`${BASE}index.html`), { denylist: [new RegExp(`^${escapeRe(BASE)}api/`), new RegExp(`^${escapeRe(BASE)}share-target`)] }));
 
 // 新しいSWは待機し、ユーザーが「更新」を押したときだけ有効化する（処理中の強制リロード防止）。
 self.addEventListener('message', (event) => {
