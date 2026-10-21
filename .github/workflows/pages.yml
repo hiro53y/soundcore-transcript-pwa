@@ -22,7 +22,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Build (サブパス配信: /<リポジトリ名>/)
+      - name: "Build (サブパス配信 /<リポジトリ名>/)"
         run: npm run build -w @app/web
         env:
           VITE_BASE: /${{ github.event.repository.name }}/
